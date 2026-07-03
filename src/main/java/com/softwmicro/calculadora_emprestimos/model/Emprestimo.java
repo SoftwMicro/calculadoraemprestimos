@@ -17,7 +17,7 @@ public class Emprestimo {
     private LocalDate dataFinal;
     private LocalDate primeiroPagamento;
     private BigDecimal valor;
-    private BigDecimal taxaJuros; // monthly percentage (ex: 1.5 for 1.5%)
+    private BigDecimal taxaJuros; // percentual mensal (ex.: 1.5 para 1,5% ao mês)
 
     private LocalDateTime criadoEm;
 
@@ -25,7 +25,7 @@ public class Emprestimo {
         this.criadoEm = LocalDateTime.now();
     }
 
-    // getters and setters
+    // getters e setters
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 

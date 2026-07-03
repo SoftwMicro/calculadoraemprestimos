@@ -18,7 +18,7 @@ public class Parcela {
 
     public Parcela() {}
 
-    // getters and setters
+    // getters e setters
     public LocalDate getDataCompetencia() { return dataCompetencia; }
     public void setDataCompetencia(LocalDate dataCompetencia) { this.dataCompetencia = dataCompetencia; }
 

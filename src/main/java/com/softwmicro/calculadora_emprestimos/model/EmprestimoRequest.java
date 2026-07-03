@@ -8,7 +8,7 @@ public class EmprestimoRequest {
     private LocalDate dataFinal;
     private LocalDate primeiroPagamento;
     private BigDecimal valor;
-    private BigDecimal taxaJuros; // monthly percentage
+    private BigDecimal taxaJuros; // percentual mensal
 
     public EmprestimoRequest() {}
 

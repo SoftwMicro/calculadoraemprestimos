@@ -22,15 +22,15 @@ public class EmprestimoService {
     }
 
     public List<Parcela> calcular(EmprestimoRequest req) {
-        // validations
+        // validações
         if (!req.getDataFinal().isAfter(req.getDataInicial())) {
-            throw new IllegalArgumentException("dataFinal must be after dataInicial");
+            throw new IllegalArgumentException("A data final deve ser maior que a data inicial");
         }
         if (!(req.getPrimeiroPagamento().isAfter(req.getDataInicial()) && req.getPrimeiroPagamento().isBefore(req.getDataFinal()))) {
-            throw new IllegalArgumentException("primeiroPagamento must be after dataInicial and before dataFinal");
+            throw new IllegalArgumentException("A data de primeiro pagamento deve ser maior que a data inicial e menor que a data final");
         }
 
-        // persist request
+        // persistir requisição
         Emprestimo ent = new Emprestimo();
         ent.setDataInicial(req.getDataInicial());
         ent.setDataFinal(req.getDataFinal());
@@ -42,12 +42,12 @@ public class EmprestimoService {
         BigDecimal principal = req.getValor();
         BigDecimal monthlyRate = req.getTaxaJuros().divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_EVEN);
 
-        // build payment dates
+        // construir datas de pagamento
         List<LocalDate> paymentDates = new ArrayList<>();
         LocalDate cur = req.getPrimeiroPagamento();
         while (!cur.isAfter(req.getDataFinal())) {
             paymentDates.add(cur);
-            // add one month keeping day-of-month; if day too large use last day of month
+            // avançar um mês mantendo o dia do mês; se o dia não existir no próximo mês usar o último dia do mês
             int day = cur.getDayOfMonth();
             YearMonth nextYm = YearMonth.from(cur).plusMonths(1);
             int maxDay = nextYm.lengthOfMonth();
@@ -57,13 +57,13 @@ public class EmprestimoService {
 
         int n = paymentDates.size();
 
-        // compute fixed payment (annuity)
+        // calcular parcela fixa (anuidade)
         BigDecimal payment = BigDecimal.ZERO;
         if (n > 0) {
             if (monthlyRate.compareTo(BigDecimal.ZERO) == 0) {
                 payment = principal.divide(BigDecimal.valueOf(n), 10, RoundingMode.HALF_EVEN);
             } else {
-                // payment = P * i / (1 - (1+i)^-n)
+                // fórmula: pagamento = P * i / (1 - (1+i)^-n)
                 double i = monthlyRate.doubleValue();
                 double denom = 1 - Math.pow(1 + i, -n);
                 double pmt = principal.doubleValue() * i / denom;
@@ -71,7 +71,7 @@ public class EmprestimoService {
             }
         }
 
-        // precompute payment details
+        // pré-calcular detalhes dos pagamentos
         List<BigDecimal> interests = new ArrayList<>();
         List<BigDecimal> amortizacoes = new ArrayList<>();
         List<BigDecimal> balancesAfter = new ArrayList<>();
@@ -80,9 +80,9 @@ public class EmprestimoService {
         for (int idx = 0; idx < n; idx++) {
             BigDecimal interest = balance.multiply(monthlyRate).setScale(10, RoundingMode.HALF_EVEN);
             BigDecimal amort = payment.subtract(interest).setScale(10, RoundingMode.HALF_EVEN);
-            // guard last amortization to avoid negative
+            // ajustar última amortização para evitar valor negativo
             if (idx == n - 1) {
-                amort = balance; // pay remaining principal
+                amort = balance; // quitar o principal restante
                 payment = interest.add(amort).setScale(10, RoundingMode.HALF_EVEN);
             }
             balance = balance.subtract(amort).setScale(10, RoundingMode.HALF_EVEN);
@@ -91,7 +91,7 @@ public class EmprestimoService {
             balancesAfter.add(balance);
         }
 
-        // build timeline: startDate, all month-ends between, endDate
+        // construir timeline: data inicial, todos os últimos dias do mês entre as datas, data final
         Set<LocalDate> timelineSet = new HashSet<>();
         timelineSet.add(req.getDataInicial());
 
@@ -102,7 +102,7 @@ public class EmprestimoService {
             if ((lastDay.isAfter(req.getDataInicial()) || lastDay.isEqual(req.getDataInicial())) && (lastDay.isBefore(req.getDataFinal()) || lastDay.isEqual(req.getDataFinal()))) {
                 timelineSet.add(lastDay);
             }
-            // move to next month
+            // avançar para o próximo mês
             cursor = cursor.plusMonths(1).withDayOfMonth(1);
         }
 
@@ -113,7 +113,7 @@ public class EmprestimoService {
 
         List<Parcela> resultado = new ArrayList<>();
 
-        // helper to compute balance after k payments (k payments applied)
+        // função auxiliar para calcular o saldo após k pagamentos (k pagamentos aplicados)
         java.util.function.IntFunction<BigDecimal> balanceAfterK = (k) -> {
             if (k <= 0) return principal;
             return balancesAfter.get(Math.min(k - 1, balancesAfter.size() - 1));
@@ -126,7 +126,7 @@ public class EmprestimoService {
             row.setDataCompetencia(d);
             row.setValorEmprestimo(principal.setScale(2, RoundingMode.HALF_EVEN));
 
-            // how many payments have occurred up to this date
+            // quantos pagamentos ocorreram até esta data
             int pagos = 0;
             for (LocalDate pd : paymentDates) {
                 if (!pd.isAfter(d)) pagos++;
@@ -136,7 +136,7 @@ public class EmprestimoService {
             row.setSaldoDevedor(saldoDevedor.setScale(2, RoundingMode.HALF_EVEN));
 
             if (pagos > 0 && paymentDates.get(pagos - 1).isEqual(d)) {
-                // this is a payment date
+                // esta é uma data de pagamento
                 int idx = pagos - 1;
                 BigDecimal interest = interests.get(idx).setScale(2, RoundingMode.HALF_EVEN);
                 BigDecimal amort = amortizacoes.get(idx).setScale(2, RoundingMode.HALF_EVEN);
@@ -149,18 +149,18 @@ public class EmprestimoService {
                 acumulado = acumulado.add(interest).setScale(2, RoundingMode.HALF_EVEN);
                 row.setAcumulado(acumulado);
                 row.setPago(total);
-                // reset acumulado after payment
+                // resetar o acumulado após o pagamento
                 acumulado = BigDecimal.ZERO;
             } else {
-                // non-payment rows
+                // linhas que não são de pagamento
                 row.setConsolidada("");
                 row.setTotal(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_EVEN));
                 row.setAmortizacao(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_EVEN));
                 row.setSaldo(saldoDevedor.setScale(2, RoundingMode.HALF_EVEN));
 
-                // If this date is between firstPayment and next payment and is a month-end, provision interest
+                // se esta data estiver entre o primeiro pagamento e o próximo pagamento e for fim de mês, provisionar juros
                 if (!d.isBefore(req.getPrimeiroPagamento()) && paymentDates.stream().anyMatch(pd -> pd.isAfter(d))) {
-                    // interest based on balance after previous payments (pagos)
+                    // juros calculados com base no saldo após pagamentos anteriores (pagos)
                     BigDecimal provision = balanceAfterK.apply(pagos).multiply(monthlyRate).setScale(2, RoundingMode.HALF_EVEN);
                     acumulado = acumulado.add(provision).setScale(2, RoundingMode.HALF_EVEN);
                     row.setProvisao(provision);
