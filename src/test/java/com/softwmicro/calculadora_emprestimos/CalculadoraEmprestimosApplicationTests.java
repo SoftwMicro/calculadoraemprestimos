@@ -1,0 +1,13 @@
+package com.softwmicro.calculadora_emprestimos;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.SpringBootTest;
+
+@SpringBootTest
+class CalculadoraEmprestimosApplicationTests {
+
+	@Test
+	void contextLoads() {
+	}
+
+}
