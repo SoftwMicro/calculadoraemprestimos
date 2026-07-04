@@ -40,55 +40,55 @@ public class EmprestimoService {
         repository.save(ent);
 
         BigDecimal principal = req.getValor();
-        BigDecimal monthlyRate = req.getTaxaJuros().divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_EVEN);
+        BigDecimal taxaMensal = req.getTaxaJuros().divide(BigDecimal.valueOf(100), 10, RoundingMode.HALF_EVEN);
 
         // construir datas de pagamento
-        List<LocalDate> paymentDates = new ArrayList<>();
-        LocalDate cur = req.getPrimeiroPagamento();
-        while (!cur.isAfter(req.getDataFinal())) {
-            paymentDates.add(cur);
+        List<LocalDate> datasPagamento = new ArrayList<>();
+        LocalDate atual = req.getPrimeiroPagamento();
+        while (!atual.isAfter(req.getDataFinal())) {
+            datasPagamento.add(atual);
             // avançar um mês mantendo o dia do mês; se o dia não existir no próximo mês usar o último dia do mês
-            int day = cur.getDayOfMonth();
-            YearMonth nextYm = YearMonth.from(cur).plusMonths(1);
-            int maxDay = nextYm.lengthOfMonth();
-            int dayNext = Math.min(day, maxDay);
-            cur = LocalDate.of(nextYm.getYear(), nextYm.getMonth(), dayNext);
+            int dia = atual.getDayOfMonth();
+            YearMonth proxMesAno = YearMonth.from(atual).plusMonths(1);
+            int maxDia = proxMesAno.lengthOfMonth();
+            int diaProx = Math.min(dia, maxDia);
+            atual = LocalDate.of(proxMesAno.getYear(), proxMesAno.getMonth(), diaProx);
         }
 
-        int n = paymentDates.size();
+        int qtdParcelas = datasPagamento.size();
 
         // calcular parcela fixa (anuidade)
-        BigDecimal payment = BigDecimal.ZERO;
-        if (n > 0) {
-            if (monthlyRate.compareTo(BigDecimal.ZERO) == 0) {
-                payment = principal.divide(BigDecimal.valueOf(n), 10, RoundingMode.HALF_EVEN);
+        BigDecimal valorParcela = BigDecimal.ZERO;
+        if (qtdParcelas > 0) {
+            if (taxaMensal.compareTo(BigDecimal.ZERO) == 0) {
+                valorParcela = principal.divide(BigDecimal.valueOf(qtdParcelas), 10, RoundingMode.HALF_EVEN);
             } else {
                 // fórmula: pagamento = P * i / (1 - (1+i)^-n)
-                double i = monthlyRate.doubleValue();
-                double denom = 1 - Math.pow(1 + i, -n);
+                double i = taxaMensal.doubleValue();
+                double denom = 1 - Math.pow(1 + i, -qtdParcelas);
                 double pmt = principal.doubleValue() * i / denom;
-                payment = BigDecimal.valueOf(pmt).setScale(10, RoundingMode.HALF_EVEN);
+                valorParcela = BigDecimal.valueOf(pmt).setScale(10, RoundingMode.HALF_EVEN);
             }
         }
 
         // pré-calcular detalhes dos pagamentos
-        List<BigDecimal> interests = new ArrayList<>();
+        List<BigDecimal> juros = new ArrayList<>();
         List<BigDecimal> amortizacoes = new ArrayList<>();
-        List<BigDecimal> balancesAfter = new ArrayList<>();
+        List<BigDecimal> saldosApos = new ArrayList<>();
 
-        BigDecimal balance = principal;
-        for (int idx = 0; idx < n; idx++) {
-            BigDecimal interest = balance.multiply(monthlyRate).setScale(10, RoundingMode.HALF_EVEN);
-            BigDecimal amort = payment.subtract(interest).setScale(10, RoundingMode.HALF_EVEN);
+        BigDecimal saldo = principal;
+        for (int indice = 0; indice < qtdParcelas; indice++) {
+            BigDecimal j = saldo.multiply(taxaMensal).setScale(10, RoundingMode.HALF_EVEN);
+            BigDecimal amortizacao = valorParcela.subtract(j).setScale(10, RoundingMode.HALF_EVEN);
             // ajustar última amortização para evitar valor negativo
-            if (idx == n - 1) {
-                amort = balance; // quitar o principal restante
-                payment = interest.add(amort).setScale(10, RoundingMode.HALF_EVEN);
+            if (indice == qtdParcelas - 1) {
+                amortizacao = saldo; // quitar o principal restante
+                valorParcela = j.add(amortizacao).setScale(10, RoundingMode.HALF_EVEN);
             }
-            balance = balance.subtract(amort).setScale(10, RoundingMode.HALF_EVEN);
-            interests.add(interest);
-            amortizacoes.add(amort);
-            balancesAfter.add(balance);
+            saldo = saldo.subtract(amortizacao).setScale(10, RoundingMode.HALF_EVEN);
+            juros.add(j);
+            amortizacoes.add(amortizacao);
+            saldosApos.add(saldo);
         }
 
         // construir timeline: data inicial, todos os últimos dias do mês entre as datas, data final
@@ -114,9 +114,9 @@ public class EmprestimoService {
         List<Parcela> resultado = new ArrayList<>();
 
         // função auxiliar para calcular o saldo após k pagamentos (k pagamentos aplicados)
-        java.util.function.IntFunction<BigDecimal> balanceAfterK = (k) -> {
+        java.util.function.IntFunction<BigDecimal> saldoAposK = (k) -> {
             if (k <= 0) return principal;
-            return balancesAfter.get(Math.min(k - 1, balancesAfter.size() - 1));
+            return saldosApos.get(Math.min(k - 1, saldosApos.size() - 1));
         };
 
         BigDecimal acumulado = BigDecimal.ZERO;
@@ -128,23 +128,23 @@ public class EmprestimoService {
 
             // quantos pagamentos ocorreram até esta data
             int pagos = 0;
-            for (LocalDate pd : paymentDates) {
-                if (!pd.isAfter(d)) pagos++;
+            for (LocalDate dp : datasPagamento) {
+                if (!dp.isAfter(d)) pagos++;
             }
 
-            BigDecimal saldoDevedor = balanceAfterK.apply(pagos);
+            BigDecimal saldoDevedor = saldoAposK.apply(pagos);
             row.setSaldoDevedor(saldoDevedor.setScale(2, RoundingMode.HALF_EVEN));
 
-            if (pagos > 0 && paymentDates.get(pagos - 1).isEqual(d)) {
+            if (pagos > 0 && datasPagamento.get(pagos - 1).isEqual(d)) {
                 // esta é uma data de pagamento
-                int idx = pagos - 1;
-                BigDecimal interest = interests.get(idx).setScale(2, RoundingMode.HALF_EVEN);
-                BigDecimal amort = amortizacoes.get(idx).setScale(2, RoundingMode.HALF_EVEN);
-                BigDecimal total = interest.add(amort).setScale(2, RoundingMode.HALF_EVEN);
-                row.setConsolidada((idx + 1) + "/" + n);
+                int indice = pagos - 1;
+                BigDecimal interest = juros.get(indice).setScale(2, RoundingMode.HALF_EVEN);
+                BigDecimal amortizacao = amortizacoes.get(indice).setScale(2, RoundingMode.HALF_EVEN);
+                BigDecimal total = interest.add(amortizacao).setScale(2, RoundingMode.HALF_EVEN);
+                row.setConsolidada((indice + 1) + "/" + qtdParcelas);
                 row.setTotal(total);
-                row.setAmortizacao(amort);
-                row.setSaldo(balancesAfter.get(idx).setScale(2, RoundingMode.HALF_EVEN));
+                row.setAmortizacao(amortizacao);
+                row.setSaldo(saldosApos.get(indice).setScale(2, RoundingMode.HALF_EVEN));
                 row.setProvisao(interest);
                 acumulado = acumulado.add(interest).setScale(2, RoundingMode.HALF_EVEN);
                 row.setAcumulado(acumulado);
@@ -159,9 +159,9 @@ public class EmprestimoService {
                 row.setSaldo(saldoDevedor.setScale(2, RoundingMode.HALF_EVEN));
 
                 // se esta data estiver entre o primeiro pagamento e o próximo pagamento e for fim de mês, provisionar juros
-                if (!d.isBefore(req.getPrimeiroPagamento()) && paymentDates.stream().anyMatch(pd -> pd.isAfter(d))) {
+                if (!d.isBefore(req.getPrimeiroPagamento()) && datasPagamento.stream().anyMatch(dp -> dp.isAfter(d))) {
                     // juros calculados com base no saldo após pagamentos anteriores (pagos)
-                    BigDecimal provision = balanceAfterK.apply(pagos).multiply(monthlyRate).setScale(2, RoundingMode.HALF_EVEN);
+                    BigDecimal provision = saldoAposK.apply(pagos).multiply(taxaMensal).setScale(2, RoundingMode.HALF_EVEN);
                     acumulado = acumulado.add(provision).setScale(2, RoundingMode.HALF_EVEN);
                     row.setProvisao(provision);
                     row.setAcumulado(acumulado);
