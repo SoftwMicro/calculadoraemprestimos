@@ -108,6 +108,10 @@ public class EmprestimoService {
 
         timelineSet.add(req.getDataFinal());
 
+        // garantir que as datas de pagamento também estejam na timeline
+        // para que as linhas referentes a pagamentos efetivos sejam geradas
+        timelineSet.addAll(datasPagamento);
+
         List<LocalDate> timeline = new ArrayList<>(timelineSet);
         Collections.sort(timeline);
 
